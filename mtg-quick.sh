@@ -83,7 +83,7 @@ info "依赖检查完成"
 # ---------- 获取最新版本 ----------
 step_info "获取版本"
 VERSION=$(curl -sL --max-time 15 "https://api.github.com/repos/9seconds/mtg/releases/latest" \
-  | python3 -c "import sys,json; print(json.load(sys.stdin).get('tag_name',''))" 2>/dev/null)
+  | awk -F'"' '/tag_name/{print $4; exit}' 2>/dev/null)
 [ -z "$VERSION" ] && VERSION="v2.2.8"
 V="${VERSION#v}"
 info "mtg $VERSION"
@@ -299,7 +299,7 @@ INIT
   chmod +x /etc/init.d/mtg
   rc-update add mtg default 2>/dev/null
   rc-service mtg restart 2>/dev/null || { err "服务启动失败"; tail -10 /var/log/mtg.log 2>/dev/null; exit 1; }
-  sleep 2
+  i=0; while [ $i -lt 10 ]; do rc-service mtg status 2>/dev/null | grep -q "started" && break; sleep 1; i=$((i+1)); done
   rc-service mtg status 2>/dev/null | grep -q "started" || { err "mtg 未运行"; tail -20 /var/log/mtg.log 2>/dev/null; exit 1; }
 fi
 info "服务已运行，已设置开机自启"
@@ -315,7 +315,12 @@ if command -v firewall-cmd &>/dev/null && firewall-cmd --state 2>/dev/null | gre
 fi
 
 # ---------- 注册管理命令 ----------
-ln -sf "$0" /usr/local/bin/mtg-quick 2>/dev/null || true
+SELF_URL="https://raw.githubusercontent.com/bababoyi6/nihao/main/mtg-quick.sh"
+if [ -f /usr/local/bin/mtg-quick ] && [ ! -L /usr/local/bin/mtg-quick ]; then
+  : # 已存在实际文件，不动
+elif [ "$0" != "/usr/local/bin/mtg-quick" ] && [ "$0" != "/bin/mtg-quick" ]; then
+  curl -fsSL "$SELF_URL" -o /usr/local/bin/mtg-quick 2>/dev/null && chmod +x /usr/local/bin/mtg-quick
+fi
 
 # ---------- 输出链接 ----------
 echo ""
