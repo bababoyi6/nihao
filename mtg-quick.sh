@@ -140,7 +140,6 @@ info "Secret: $SECRET"
 
 # ---------- IP 模式 ----------
 step_info "IP 模式"
-IP_MODE="dual"
 if [ -t 0 ]; then
   echo ""
   echo "  [1] IPv4 仅 (默认，兼容性最好)"
@@ -243,11 +242,16 @@ EOF
 info "配置已写入 /etc/mtg.toml"
 
 # ---------- 验证 ----------
-$BIN doctor /etc/mtg.toml 2>&1 | sed 's/^/  /' || warn "doctor 有警告（不影响运行）"
+$BIN doctor /etc/mtg.toml 2>&1 | sed 's/^/  /'
+if [ "${PIPESTATUS[0]}" -ne 0 ]; then
+  warn "doctor 有警告（不影响运行）"
+fi
 
 # ---------- 安装服务 ----------
 step_info "服务"
 if [ "$INIT" = "systemd" ]; then
+  # 检测 systemd 版本——DynamicUser 需要 v235+
+  SYSTEMD_VER=$(systemctl --version 2>/dev/null | head -1 | awk '{print $2}' | sed 's/[^0-9]*//g' || echo 0)
   cat > /etc/systemd/system/mtg.service <<UNIT
 [Unit]
 Description=mtg - MTProto proxy server
@@ -258,9 +262,11 @@ After=network.target
 ExecStart=$BIN run /etc/mtg.toml
 Restart=always
 RestartSec=3
-DynamicUser=true
+$(if [ "$SYSTEMD_VER" -ge 235 ] 2>/dev/null; then
+  echo "DynamicUser=true"
+  echo "AmbientCapabilities=CAP_NET_BIND_SERVICE"
+fi)
 LimitNOFILE=65536
-AmbientCapabilities=CAP_NET_BIND_SERVICE
 
 [Install]
 WantedBy=multi-user.target
@@ -315,7 +321,7 @@ ln -sf "$0" /usr/local/bin/mtg-quick 2>/dev/null || true
 echo ""
 echo "━━━ MTG 部署完成 ━━━"
 echo ""
-$BIN access /etc/mtg.toml 2>/dev/null || {
+{
   S=$SECRET
   [ "$IP_MODE" != "v6" ] && [ -n "$PUBLIC_IPV4" ] && echo "tg://proxy?server=$PUBLIC_IPV4&port=$PORT&secret=$S"
   [ "$IP_MODE" != "v4" ] && [ -n "$PUBLIC_IPV6" ] && echo "tg://proxy?server=$PUBLIC_IPV6&port=$PORT&secret=$S"
@@ -323,5 +329,5 @@ $BIN access /etc/mtg.toml 2>/dev/null || {
 echo ""
 echo "  Secret: $SECRET  端口: $PORT  伪装: $DOMAIN"
 echo ""
-echo "发送上面的 tg://proxy 链接到 Telegram 即可使用"
+echo "发送上面的 tg://proxy 链接到 Telegram 即可使用 🚀"
 echo ""
