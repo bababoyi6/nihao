@@ -189,7 +189,11 @@ UNIT
 
 systemctl daemon-reload
 systemctl enable mtg --now 2>/dev/null || { err "服务启动失败"; journalctl -u mtg -n 20 --no-pager; exit 1; }
-sleep 2
+
+for i in 1 2 3 4 5 6 7 8 9 10; do
+  systemctl is-active --quiet mtg && break
+  sleep 1
+done
 systemctl is-active --quiet mtg || { err "mtg 未运行"; journalctl -u mtg -n 30 --no-pager; exit 1; }
 info "服务运行中，已设置开机自启"
 
@@ -225,6 +229,6 @@ echo -e "${YELLOW}━━━ 管理 ━━━${NC}"
 echo -e "  ${GREEN}systemctl status mtg${NC}         查看状态"
 echo -e "  ${GREEN}journalctl -u mtg -n 30 -f${NC}   实时日志"
 echo -e "  ${GREEN}systemctl restart mtg${NC}         重启"
-echo -e "  ${GREEN}$0 uninstall${NC}        卸载"
+echo -e "  ${GREEN}bash <(curl -sL https://raw.githubusercontent.com/bababoyi6/nihao/main/mtg-quick.sh) uninstall${NC}  卸载"
 echo ""
 info "把上面的 tg://proxy 链接发到 Telegram 即可使用 🚀"
