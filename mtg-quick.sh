@@ -243,18 +243,49 @@ debug = false
 concurrency = 8192
 prefer-ip = "$PREFER"
 dns = "https://1.1.1.1"
-tolerate-time-skewness = "5s"
+tolerate-time-skewness = "10s"
+auto-update = true
+allow-fallback-on-unknown-dc = true
+
+[domain-fronting]
+# 伪装域名直连 IP 覆盖（DNS 被污染时用）
+# host = "$DOMAIN"
+
+[network]
+# 使用更快、更稳定的 DNS（备用）
+# dns = "https://dns.quad9.net/dns-query"
+
+[network.timeout]
+tcp = "5s"
+http = "10s"
+idle = "10m"
+handshake = "15s"
+
+[network.keep-alive]
+disabled = false
+idle = "30s"
+interval = "15s"
+count = 3
 
 [defense.anti-replay]
-max-size = "1mib"
+max-size = "4mib"
+
+[defense.doppelganger]
+# 伪装流量特征，使 DPI 更难通过统计特征识别 MTProto
+# 取消注释启用（需要 HTTPS URL）
+# urls = [ "https://cdn.jsdelivr.net/npm/react/umd/react.production.min.js" ]
+# repeats-per-raid = 10
+# raid-each = "6h"
+# drs = true
 
 [defense.blocklist]
-urls = [ "https://iplists.firehol.org/files/firehol_level1.netset" ]
-update-each = "24h"
+enabled = false
+# 注释掉默认的 firehol_level1（包含太多内网段）
+# urls = [ "https://iplists.firehol.org/files/firehol_level1.netset" ]
+# update-each = "24h"
 
 [stats.prometheus]
-enabled = true
-bind-to = "127.0.0.1:9999"
+enabled = false
 EOF
 [ -n "$PUBLIC_IPV4" ] && echo "public-ipv4 = \"$PUBLIC_IPV4\"" >> /etc/mtg.toml
 [ -n "$PUBLIC_IPV6" ] && echo "public-ipv6 = \"$PUBLIC_IPV6\"" >> /etc/mtg.toml
