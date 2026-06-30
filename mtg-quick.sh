@@ -101,24 +101,25 @@ done
 [ -n "$PUBLIC_IPV6" ] && info "IPv6: $PUBLIC_IPV6" || warn "未检测到 IPv6"
 
 # ---------- 选择伪装域名 ----------
-step "生成 Secret"
-DOMAIN="cloudflare.com"
-if [ -n "$PUBLIC_IPV4" ]; then
-  ASN_ORG=$(curl -s4 --max-time 5 "https://ipapi.co/${PUBLIC_IPV4}/org/" 2>/dev/null || true)
-  echo "$ASN_ORG" | grep -qi "digitalocean"   && DOMAIN="digitalocean.com"
-  echo "$ASN_ORG" | grep -qi "aws\|amazon"     && DOMAIN="aws.amazon.com"
-  echo "$ASN_ORG" | grep -qi "google\|gcp"     && DOMAIN="google.com"
-  echo "$ASN_ORG" | grep -qi "vultr"           && DOMAIN="vultr.com"
-  echo "$ASN_ORG" | grep -qi "hetzner"         && DOMAIN="hetzner.com"
-  echo "$ASN_ORG" | grep -qi "linode"          && DOMAIN="linode.com"
-  echo "$ASN_ORG" | grep -qi "ovh"             && DOMAIN="ovh.com"
-  echo "$ASN_ORG" | grep -qi "oracle"          && DOMAIN="oracle.com"
+step "选择伪装域名"
+DOMAIN=""
+if [ -t 0 ]; then
+  echo ""
+  echo "  例: digitalocean.com / aws.amazon.com / google.com / cloudflare.com"
+  echo "  建议选一个跟你 VPS 同厂商的域名，流量更像真实 HTTPS"
+  read -r -p "伪装域名: " DOMAIN || true
 fi
-info "伪装域名: $DOMAIN（建议这个域名的 IP 段与你的 VPS 匹配）"
+if [ -z "$DOMAIN" ]; then
+  DOMAIN="cloudflare.com"
+  warn "未输入，默认使用 cloudflare.com"
+fi
+info "伪装域名: $DOMAIN"
 
+step "生成 Secret"
 SECRET=$(/usr/local/bin/mtg generate-secret "$DOMAIN" 2>/dev/null)
 if [ -z "$SECRET" ]; then
   SECRET=$(/usr/local/bin/mtg generate-secret cloudflare.com 2>/dev/null)
+  warn "域名生成失败，已回退 cloudflare.com"
 fi
 info "Secret: $SECRET"
 
