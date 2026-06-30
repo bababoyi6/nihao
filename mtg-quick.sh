@@ -1,38 +1,43 @@
 #!/usr/bin/env bash
 # ==============================================================
-#  MTG (MTPROTO Proxy) 一键部署脚本
-#  项目: https://github.com/9seconds/mtg
+#  MTG-Quick — MTPROTO Proxy 一键部署脚本
+#  原项目: https://github.com/9seconds/mtg
 #  用法: bash <(curl -sL https://raw.githubusercontent.com/bababoyi6/nihao/main/mtg-quick.sh)
-#  卸载: bash <(curl -sL https://raw.githubusercontent.com/bababoyi6/nihao/main/mtg-quick.sh) uninstall
+#
+#  特性:
+#  - 支持 systemd (Debian/Ubuntu/CentOS) 和 OpenRC (Alpine)
+#  - 交互式域名、端口、IP模式选择
+#  - 自动安装依赖
+#  - 装完后可用 mtg-quick 命令管理
 # ==============================================================
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'
-BOLD='\033[1m'; NC='\033[0m'
+RED='\033[31m'; GREEN='\033[32m'; YELLOW='\033[33m'; CYAN='\033[36m'; NC='\033[0m'
 info()  { echo -e "${GREEN}[✓]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[!]${NC} $1"; }
 err()   { echo -e "${RED}[✗]${NC} $1"; }
-step()  { echo -e "\n${CYAN}━━━ $1 ━━━${NC}"; }
+
+CONF_DIR="/etc/mtg-quick"
+BIN="/usr/local/bin/mtg"
 
 # ---------- 卸载 ----------
 if [ "${1:-}" = "uninstall" ]; then
-  step "卸载 mtg"
-  systemctl stop mtg 2>/dev/null || true
-  systemctl disable mtg 2>/dev/null || true
-  rm -f /etc/systemd/system/mtg.service
-  systemctl daemon-reload
-  rm -f /usr/local/bin/mtg /etc/mtg.toml
+  echo "卸载 mtg..."
+  systemctl stop mtg 2>/dev/null || rc-service mtg stop 2>/dev/null || true
+  systemctl disable mtg 2>/dev/null || rc-update del mtg 2>/dev/null || true
+  rm -f /etc/systemd/system/mtg.service /etc/init.d/mtg
+  systemctl daemon-reload 2>/dev/null || true
+  rm -f "$BIN" /etc/mtg.toml
+  rm -rf "$CONF_DIR" /usr/local/bin/mtg-quick
   info "mtg 已卸载"
   exit 0
 fi
 
-# ---------- Root 检查 ----------
-if [ "$(id -u)" -ne 0 ]; then
-  err "请以 root 运行（sudo -i 或 su -）"
-  exit 1
-fi
+# ---------- Root ----------
+[ "$(id -u)" -ne 0 ] && { err "请以 root 运行"; exit 1; }
 
-# ---------- 架构检测 ----------
-step "系统检测"
+# ---------- 系统检测 ----------
+step_info() { echo -e "\n${CYAN}━━━ $1 ━━━${NC}"; }
+
 ARCH=$(uname -m)
 case "$ARCH" in
   x86_64)  BIN_ARCH="linux-amd64"    ;;
@@ -42,50 +47,63 @@ case "$ARCH" in
   i386|i686) BIN_ARCH="linux-386"     ;;
   mips)    BIN_ARCH="linux-mips"      ;;
   mipsle)  BIN_ARCH="linux-mipsle"    ;;
-  *)
-    err "不支持的架构: $ARCH"
-    exit 1
-    ;;
+  *) err "不支持的架构: $ARCH"; exit 1 ;;
 esac
 
-if [ "$(uname -s)" != "Linux" ]; then
-  err "仅支持 Linux"
-  exit 1
+OS_ID=""; PKG_MGR=""; INIT="systemd"
+if [ -f /etc/os-release ]; then
+  OS_ID=$(grep ^ID= /etc/os-release | cut -d= -f2 | tr -d '"')
 fi
-info "架构: $ARCH"
+if [ -f /etc/alpine-release ]; then
+  OS_ID="alpine"; PKG_MGR="apk"; INIT="openrc"
+elif [[ "$OS_ID" =~ ^(debian|ubuntu)$ ]]; then
+  PKG_MGR="apt"
+elif [[ "$OS_ID" =~ ^(centos|rhel|rocky|almalinux|fedora)$ ]]; then
+  PKG_MGR="yum"
+else
+  err "不支持的系统: $OS_ID"; exit 1
+fi
+info "系统: $OS_ID 架构: $ARCH 服务管理: $INIT"
+
+# ---------- 安装依赖 ----------
+step_info "安装依赖"
+DEPS=(curl tar gawk coreutils openssl ca-certificates)
+if [ "$PKG_MGR" = "apk" ]; then
+  apk update -q 2>/dev/null
+  apk add -q "${DEPS[@]}" 2>&1 | tail -1
+elif [ "$PKG_MGR" = "apt" ]; then
+  apt-get update -qq 2>/dev/null
+  DEPS_BASE=(curl tar gawk coreutils openssl ca-certificates)
+  apt-get install -y -qq "${DEPS_BASE[@]}" 2>&1 | tail -1
+elif [ "$PKG_MGR" = "yum" ]; then
+  yum install -y -q curl tar gawk coreutils openssl ca-certificates 2>&1 | tail -1
+fi
+info "依赖检查完成"
 
 # ---------- 获取最新版本 ----------
-step "获取最新版本"
-LATEST=$(curl -sL --max-time 15 "https://api.github.com/repos/9seconds/mtg/releases/latest" \
+step_info "获取版本"
+VERSION=$(curl -sL --max-time 15 "https://api.github.com/repos/9seconds/mtg/releases/latest" \
   | python3 -c "import sys,json; print(json.load(sys.stdin).get('tag_name',''))" 2>/dev/null)
-if [ -z "$LATEST" ]; then
-  LATEST="v2.2.8"
-  warn "无法获取最新版本，使用 $LATEST"
-fi
-V="${LATEST#v}"
-info "版本: $LATEST"
+[ -z "$VERSION" ] && VERSION="v2.2.8"
+V="${VERSION#v}"
+info "mtg $VERSION"
 
 # ---------- 下载 ----------
-step "下载 mtg"
-URL="https://github.com/9seconds/mtg/releases/download/${LATEST}/mtg-${V}-${BIN_ARCH}.tar.gz"
-TMP_DIR=$(mktemp -d) || { err "创建临时目录失败"; exit 1; }
-trap "rm -rf '$TMP_DIR'" EXIT
-
-curl -fsSL --max-time 60 "$URL" -o "$TMP_DIR/pkg.tar.gz" || { err "下载失败"; exit 1; }
-
-# 注意: 官方 tar.gz 解压后是 mtg-版本/ 目录，需 strip 顶层目录
-tar xzf "$TMP_DIR/pkg.tar.gz" -C "$TMP_DIR" --strip-components=1 || { err "解压失败"; exit 1; }
-[ ! -f "$TMP_DIR/mtg" ] && { err "找不到 mtg 二进制"; exit 1; }
-
-install -m 755 "$TMP_DIR/mtg" /usr/local/bin/mtg
-info "已安装: $(/usr/local/bin/mtg --version | head -1)"
+step_info "下载 mtg"
+URL="https://github.com/9seconds/mtg/releases/download/${VERSION}/mtg-${V}-${BIN_ARCH}.tar.gz"
+TMP=$(mktemp -d); trap "rm -rf '$TMP'" EXIT
+curl -fsSL --max-time 60 "$URL" -o "$TMP/pkg.tar.gz" || { err "下载失败"; exit 1; }
+tar xzf "$TMP/pkg.tar.gz" -C "$TMP" --strip-components=1 || { err "解压失败"; exit 1; }
+[ ! -f "$TMP/mtg" ] && { err "找不到 mtg 二进制"; exit 1; }
+install -m 755 "$TMP/mtg" "$BIN"
+info "已安装: $($BIN --version | head -1)"
 
 # ---------- 获取公网 IP ----------
-step "网络检测"
+step_info "检测公网 IP"
 PUBLIC_IPV4=""
 for src in "https://api.ipify.org" "https://ipv4.icanhazip.com" "https://checkip.amazonaws.com"; do
   v4=$(curl -s4 --max-time 5 "$src" 2>/dev/null || true)
-  if [ -n "$v4" ] && expr "$v4" : '[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*$' >/dev/null; then
+  if [ -n "$v4" ] && echo "$v4" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
     PUBLIC_IPV4="$v4"; break
   fi
 done
@@ -100,48 +118,78 @@ for src in "https://api6.ipify.org" "https://ipv6.icanhazip.com"; do
 done
 [ -n "$PUBLIC_IPV6" ] && info "IPv6: $PUBLIC_IPV6" || warn "未检测到 IPv6"
 
-# ---------- 选择伪装域名 ----------
-step "选择伪装域名"
+# ---------- 伪装域名 ----------
+step_info "伪装域名"
 DOMAIN=""
 if [ -t 0 ]; then
-  echo ""
-  echo "  例: digitalocean.com / aws.amazon.com / google.com / cloudflare.com"
   echo "  建议选一个跟你 VPS 同厂商的域名，流量更像真实 HTTPS"
-  read -r -p "伪装域名: " DOMAIN || true
+  echo "  例: digitalocean.com aws.amazon.com google.com cloudflare.com"
+  read -r -p "  伪装域名 (默认 cloudflare.com): " DOMAIN || true
 fi
-if [ -z "$DOMAIN" ]; then
-  DOMAIN="cloudflare.com"
-  warn "未输入，默认使用 cloudflare.com"
-fi
+[ -z "$DOMAIN" ] && DOMAIN="cloudflare.com"
 info "伪装域名: $DOMAIN"
 
-step "生成 Secret"
-SECRET=$(/usr/local/bin/mtg generate-secret "$DOMAIN" 2>/dev/null)
+# ---------- Secret ----------
+step_info "生成 Secret"
+SECRET=$($BIN generate-secret "$DOMAIN" 2>/dev/null)
 if [ -z "$SECRET" ]; then
-  SECRET=$(/usr/local/bin/mtg generate-secret cloudflare.com 2>/dev/null)
-  warn "域名生成失败，已回退 cloudflare.com"
+  SECRET=$($BIN generate-secret cloudflare.com 2>/dev/null)
+  warn "域名失败，已回退 cloudflare.com"
 fi
 info "Secret: $SECRET"
 
-# ---------- 选择端口 ----------
-step "选择端口"
-DEFAULT_PORT=443
-PORT_CHOICE=
+# ---------- IP 模式 ----------
+step_info "IP 模式"
+IP_MODE="dual"
 if [ -t 0 ]; then
   echo ""
-  echo "  [1] 443  （推荐，伪装 HTTPS）"
+  echo "  [1] IPv4 仅 (默认，兼容性最好)"
+  echo "  [2] IPv6 仅"
+  echo "  [3] 双栈 (IPv4+IPv6)"
+  read -r -t 10 -p "  选择 [1-3] (默认 1): " ip_choice || ip_choice=""
+fi
+case "${ip_choice:-1}" in
+  2) IP_MODE="v6"     ;;
+  3) IP_MODE="dual"   ;;
+  *) IP_MODE="v4"     ;;
+esac
+
+# 双栈模式下检测是否有 IPv6
+if [ "$IP_MODE" = "dual" ] && [ -z "$PUBLIC_IPV6" ]; then
+  warn "未检测到 IPv6，降级为 IPv4 仅"
+  IP_MODE="v4"
+fi
+
+if [ "$IP_MODE" = "v6" ] && [ -z "$PUBLIC_IPV6" ]; then
+  err "未检测到 IPv6，无法使用 IPv6 模式"
+  exit 1
+fi
+
+case "$IP_MODE" in
+  v4)   BIND_HINT="0.0.0.0:端口"     ;;
+  v6)   BIND_HINT="[::]:端口"         ;;
+  dual) BIND_HINT="[::]:端口"         ;;
+esac
+info "模式: $IP_MODE → $BIND_HINT"
+
+# ---------- 端口 ----------
+step_info "端口"
+DEFAULT_PORT=443
+PORT_CHOICE=""
+if [ -t 0 ]; then
+  echo ""
+  echo "  [1] 443  (推荐)"
   echo "  [2] 8443"
   echo "  [3] 3128"
   echo "  [4] 自定义"
-  read -r -t 10 -p "端口 [1-4]（默认 1）: " PORT_CHOICE || PORT_CHOICE=
+  read -r -t 10 -p "  选择 [1-4] (默认 1): " PORT_CHOICE || PORT_CHOICE=""
 fi
-
 case "${PORT_CHOICE:-1}" in
   2) PORT=8443  ;;
   3) PORT=3128  ;;
   4)
     if [ -t 0 ]; then
-      read -r -p "输入端口: " PORT
+      read -r -p "  输入端口: " PORT
     else
       PORT=$DEFAULT_PORT
     fi
@@ -151,32 +199,63 @@ esac
 : "${PORT:=$DEFAULT_PORT}"
 info "端口: $PORT"
 
-# ---------- 写配置 ----------
-step "写入配置 /etc/mtg.toml"
+# 计算绑定地址和 IP 偏好
+case "$IP_MODE" in
+  v4)   BIND="0.0.0.0:$PORT";  PREFER="only-ipv4"   ;;
+  v6)   BIND="[::]:$PORT";      PREFER="only-ipv6"   ;;
+  dual) BIND="[::]:$PORT";      PREFER="prefer-ipv6" ;;
+esac
+
+# ---------- 写入配置 ----------
+step_info "配置"
 cat > /etc/mtg.toml <<EOF
 secret = "$SECRET"
-bind-to = "[::]:${PORT}"
+bind-to = "$BIND"
 debug = false
 concurrency = 8192
-prefer-ip = "prefer-ipv6"
+prefer-ip = "$PREFER"
+dns = "https://1.1.1.1"
+tolerate-time-skewness = "5s"
+
+[defense.anti-replay]
+max-size = "1mib"
+
+[defense.blocklist]
+urls = [ "https://iplists.firehol.org/files/firehol_level1.netset" ]
+update-each = "24h"
+
+[stats.prometheus]
+enabled = true
+bind-to = "127.0.0.1:9999"
 EOF
 [ -n "$PUBLIC_IPV4" ] && echo "public-ipv4 = \"$PUBLIC_IPV4\"" >> /etc/mtg.toml
 [ -n "$PUBLIC_IPV6" ] && echo "public-ipv6 = \"$PUBLIC_IPV6\"" >> /etc/mtg.toml
-info "配置已写入"
 
-# ---------- 验证配置 ----------
-/usr/local/bin/mtg doctor /etc/mtg.toml 2>&1 | sed 's/^/  /' || warn "doctor 有警告（不影响运行）"
+# 保存配置副本便于管理命令使用
+mkdir -p "$CONF_DIR"
+cat > "$CONF_DIR/setup.conf" <<EOF
+PORT=$PORT
+SECRET=$SECRET
+DOMAIN=$DOMAIN
+IP_MODE=$IP_MODE
+EOF
 
-# ---------- systemd ----------
-step "安装系统服务"
-cat > /etc/systemd/system/mtg.service <<UNIT
+info "配置已写入 /etc/mtg.toml"
+
+# ---------- 验证 ----------
+$BIN doctor /etc/mtg.toml 2>&1 | sed 's/^/  /' || warn "doctor 有警告（不影响运行）"
+
+# ---------- 安装服务 ----------
+step_info "服务"
+if [ "$INIT" = "systemd" ]; then
+  cat > /etc/systemd/system/mtg.service <<UNIT
 [Unit]
 Description=mtg - MTProto proxy server
 Documentation=https://github.com/9seconds/mtg
 After=network.target
 
 [Service]
-ExecStart=/usr/local/bin/mtg run /etc/mtg.toml
+ExecStart=$BIN run /etc/mtg.toml
 Restart=always
 RestartSec=3
 DynamicUser=true
@@ -186,16 +265,38 @@ AmbientCapabilities=CAP_NET_BIND_SERVICE
 [Install]
 WantedBy=multi-user.target
 UNIT
+  systemctl daemon-reload
+  systemctl enable mtg --now 2>/dev/null || { err "服务启动失败"; journalctl -u mtg -n 20 --no-pager; exit 1; }
+  i=0; while [ $i -lt 10 ]; do systemctl is-active --quiet mtg && break; sleep 1; i=$((i+1)); done
+  systemctl is-active --quiet mtg || { err "mtg 未运行"; journalctl -u mtg -n 30 --no-pager; exit 1; }
 
-systemctl daemon-reload
-systemctl enable mtg --now 2>/dev/null || { err "服务启动失败"; journalctl -u mtg -n 20 --no-pager; exit 1; }
+elif [ "$INIT" = "openrc" ]; then
+  cat > /etc/init.d/mtg <<INIT
+#!/sbin/openrc-run
+name="mtg"
+description="MTProto proxy"
+command="$BIN"
+command_args="run /etc/mtg.toml"
+command_background=true
+pidfile="/run/mtg.pid"
+output_log="/var/log/mtg.log"
+error_log="/var/log/mtg.log"
+respawn_delay=5
+respawn_max=0
+rc_ulimit="-n 65536"
 
-for i in 1 2 3 4 5 6 7 8 9 10; do
-  systemctl is-active --quiet mtg && break
-  sleep 1
-done
-systemctl is-active --quiet mtg || { err "mtg 未运行"; journalctl -u mtg -n 30 --no-pager; exit 1; }
-info "服务运行中，已设置开机自启"
+depend() {
+  need net
+  after firewall
+}
+INIT
+  chmod +x /etc/init.d/mtg
+  rc-update add mtg default 2>/dev/null
+  rc-service mtg restart 2>/dev/null || { err "服务启动失败"; tail -10 /var/log/mtg.log 2>/dev/null; exit 1; }
+  sleep 2
+  rc-service mtg status 2>/dev/null | grep -q "started" || { err "mtg 未运行"; tail -20 /var/log/mtg.log 2>/dev/null; exit 1; }
+fi
+info "服务已运行，已设置开机自启"
 
 # ---------- 防火墙 ----------
 if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -qi active; then
@@ -207,18 +308,20 @@ if command -v firewall-cmd &>/dev/null && firewall-cmd --state 2>/dev/null | gre
   info "firewalld 已放行端口 $PORT"
 fi
 
+# ---------- 注册管理命令 ----------
+ln -sf "$0" /usr/local/bin/mtg-quick 2>/dev/null || true
+
 # ---------- 输出链接 ----------
-step "代理信息"
 echo ""
-
-/usr/local/bin/mtg access /etc/mtg.toml 2>/dev/null || {
+echo "━━━ MTG 部署完成 ━━━"
+echo ""
+$BIN access /etc/mtg.toml 2>/dev/null || {
   S=$SECRET
-  [ -n "$PUBLIC_IPV4" ] && echo -e "${CYAN}tg://proxy?server=$PUBLIC_IPV4&port=$PORT&secret=$S${NC}"
-  [ -n "$PUBLIC_IPV6" ] && echo -e "${CYAN}tg://proxy?server=$PUBLIC_IPV6&port=$PORT&secret=$S${NC}"
+  [ "$IP_MODE" != "v6" ] && [ -n "$PUBLIC_IPV4" ] && echo "tg://proxy?server=$PUBLIC_IPV4&port=$PORT&secret=$S"
+  [ "$IP_MODE" != "v4" ] && [ -n "$PUBLIC_IPV6" ] && echo "tg://proxy?server=$PUBLIC_IPV6&port=$PORT&secret=$S"
 }
-
 echo ""
-echo -e "  Secret: $SECRET  端口: $PORT  伪装: $DOMAIN"
+echo "  Secret: $SECRET  端口: $PORT  伪装: $DOMAIN"
 echo ""
-echo -e "发送上面的 tg://proxy 链接到 Telegram 即可使用 🚀"
+echo "发送上面的 tg://proxy 链接到 Telegram 即可使用"
 echo ""
