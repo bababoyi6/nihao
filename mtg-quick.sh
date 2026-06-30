@@ -210,25 +210,15 @@ fi
 # ---------- 输出链接 ----------
 step "代理信息"
 echo ""
-echo -e "${BOLD}${GREEN}========== MTG 代理部署完成 ==========${NC}"
-echo ""
 
 /usr/local/bin/mtg access /etc/mtg.toml 2>/dev/null || {
-  # fallback: 手动生成
   S=$SECRET
-  [ -n "$PUBLIC_IPV4" ] && echo -e "IPv4: ${CYAN}tg://proxy?server=$PUBLIC_IPV4&port=$PORT&secret=$S${NC}"
-  [ -n "$PUBLIC_IPV6" ] && echo -e "IPv6: ${CYAN}tg://proxy?server=$PUBLIC_IPV6&port=$PORT&secret=$S${NC}"
+  [ -n "$PUBLIC_IPV4" ] && echo -e "${CYAN}tg://proxy?server=$PUBLIC_IPV4&port=$PORT&secret=$S${NC}"
+  [ -n "$PUBLIC_IPV6" ] && echo -e "${CYAN}tg://proxy?server=$PUBLIC_IPV6&port=$PORT&secret=$S${NC}"
 }
 
 echo ""
-echo -e "  ${BOLD}Secret:${NC}  $SECRET"
-echo -e "  ${BOLD}端口:${NC}    $PORT"
-echo -e "  ${BOLD}伪装域名:${NC} $DOMAIN"
+echo -e "  Secret: $SECRET  端口: $PORT  伪装: $DOMAIN"
 echo ""
-echo -e "${YELLOW}━━━ 管理 ━━━${NC}"
-echo -e "  ${GREEN}systemctl status mtg${NC}         查看状态"
-echo -e "  ${GREEN}journalctl -u mtg -n 30 -f${NC}   实时日志"
-echo -e "  ${GREEN}systemctl restart mtg${NC}         重启"
-echo -e "  ${GREEN}bash <(curl -sL https://raw.githubusercontent.com/bababoyi6/nihao/main/mtg-quick.sh) uninstall${NC}  卸载"
+echo -e "发送上面的 tg://proxy 链接到 Telegram 即可使用 🚀"
 echo ""
-info "把上面的 tg://proxy 链接发到 Telegram 即可使用 🚀"
