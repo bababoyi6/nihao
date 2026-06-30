@@ -90,7 +90,7 @@ info "依赖检查完成"
 # ======================== 获取版本 ========================
 step_info "获取版本"
 VERSION=$(curl -sL --max-time 15 "https://api.github.com/repos/9seconds/mtg/releases/latest" \
-  | awk -F'"' '/tag_name/{print $4; exit}' 2>/dev/null)
+  | awk -F'"' '/tag_name/{print $4; exit}' 2>/dev/null) || true
 [ -z "$VERSION" ] && VERSION="v2.2.8"
 V="${VERSION#v}"
 info "mtg $VERSION"
@@ -210,9 +210,13 @@ esac
 # 端口占用检测
 PORT_IN_USE=0
 if command -v ss &>/dev/null; then
-  ss -tlnp "sport = :$PORT" 2>/dev/null | grep -q LISTEN && PORT_IN_USE=1
+  if ss -tlnp "sport = :$PORT" 2>/dev/null | grep -q LISTEN; then
+    PORT_IN_USE=1
+  fi
 elif command -v netstat &>/dev/null; then
-  netstat -tlnp 2>/dev/null | grep -q ":$PORT " && PORT_IN_USE=1
+  if netstat -tlnp 2>/dev/null | grep -q ":$PORT "; then
+    PORT_IN_USE=1
+  fi
 fi
 if [ "$PORT_IN_USE" -eq 1 ]; then
   warn "端口 $PORT 已被占用"
