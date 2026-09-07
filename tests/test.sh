@@ -187,9 +187,13 @@ test_setup_api_config_escaping() (
 )
 (test_setup_api_config_escaping)
 
-expected_day=$'测试服务器 2026-08-05 日报\n进站流量: 864.00 GB\n出站流量: 432.00 GB\n总流量: 1296.00 GB\n平均进站速度: 10.00 MB/s\n平均出站速度: 5.00 MB/s\n平均CPU利用率: 29%\n统计时长: 1 天 0 小时'
+expected_day=$'测试服务器 2026-08-05 日报\n进站流量: 0.86 TB\n出站流量: 0.43 TB\n总流量: 1.30 TB\n平均进站速度: 10.00 MB/s\n平均出站速度: 5.00 MB/s\n平均CPU利用率: 29%'
 actual_day="$(format_day_message 2026-08-05 864000000000 432000000000 29 100 86400)"
 assert_equal "$expected_day" "$actual_day" "daily message format"
+if grep -Fq '统计时长:' <<< "$actual_day"; then
+    printf 'FAIL: daily message still displays statistics duration\n' >&2
+    exit 1
+fi
 if grep -Fq 'protect_content' "${ROOT_DIR}/TG-check-notify.sh"; then
     printf 'FAIL: Telegram messages are still protected from copying or forwarding\n' >&2
     exit 1

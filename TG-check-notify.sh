@@ -4,7 +4,7 @@ set -Eeuo pipefail
 export LC_NUMERIC=C
 umask 077
 
-VERSION="1.14.0"
+VERSION="1.14.1"
 APP_NAME="vps-monitor"
 SERVICE_USER="vpsmonitor"
 INSTALL_DIR="/usr/local/lib/${APP_NAME}"
@@ -590,16 +590,15 @@ acquire_lock() {
 }
 
 format_day_message() {
-    local day="$1" rx="$2" tx="$3" busy="$4" total="$5" seconds="$6" duration
-    duration="$(format_duration "$seconds")"
+    local day="$1" rx="$2" tx="$3" busy="$4" total="$5" seconds="$6"
     awk -v name="$SERVER_NAME" -v day="$day" -v rx="$rx" -v tx="$tx" -v busy="$busy" \
-        -v total="$total" -v seconds="$seconds" -v duration="$duration" '
+        -v total="$total" -v seconds="$seconds" '
         BEGIN {
             cpu=(total>0 ? busy*100/total : 0)
             rx_rate=(seconds>0 ? rx/seconds/1000000 : 0)
             tx_rate=(seconds>0 ? tx/seconds/1000000 : 0)
-            printf "%s %s 日报\n进站流量: %.2f GB\n出站流量: %.2f GB\n总流量: %.2f GB\n平均进站速度: %.2f MB/s\n平均出站速度: %.2f MB/s\n平均CPU利用率: %.0f%%\n统计时长: %s", \
-                name, day, rx/1000000000, tx/1000000000, (rx+tx)/1000000000, rx_rate, tx_rate, cpu, duration
+            printf "%s %s 日报\n进站流量: %.2f TB\n出站流量: %.2f TB\n总流量: %.2f TB\n平均进站速度: %.2f MB/s\n平均出站速度: %.2f MB/s\n平均CPU利用率: %.0f%%", \
+                name, day, rx/1000000000000, tx/1000000000000, (rx+tx)/1000000000000, rx_rate, tx_rate, cpu
         }
     '
 }
